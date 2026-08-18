@@ -1,0 +1,87 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-news_intelligence}
+      POSTGRES_USER: ${POSTGRES_USER:-newsintel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-newsintel} -d ${POSTGRES_DB:-news_intelligence}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: src/NewsIntelligence.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      Database__Provider: Postgres
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:-news_intelligence};Username=${POSTGRES_USER:-newsintel};Password=${POSTGRES_PASSWORD:-change-me}
+      Redis__Enabled: ${REDIS_ENABLED:-true}
+      Redis__ConnectionString: redis:6379
+      Jwt__Issuer: NewsIntelligence
+      Jwt__Audience: NewsIntelligence.Web
+      Jwt__Secret: ${JWT_SECRET:-change-me-to-a-long-random-secret-at-least-32-characters}
+      Webz__Mode: ${WEBZ_MODE:-Mock}
+      Webz__BaseUrl: ${WEBZ_BASE_URL:-https://api.webz.io/}
+      Webz__ApiToken: ${WEBZ_API_TOKEN:-}
+      Seed__Enabled: ${SEED_DEMO_DATA:-true}
+      Seed__Email: ${DEMO_USER_EMAIL:-demo@newsintel.dev}
+      Seed__Password: ${DEMO_USER_PASSWORD:-Demo123!}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: /api
+    environment:
+      NODE_ENV: production
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gateway:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

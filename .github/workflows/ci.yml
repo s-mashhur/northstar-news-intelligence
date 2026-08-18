@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Restore
+        run: dotnet restore backend/NewsIntelligence.sln
+      - name: Build
+        run: dotnet build backend/NewsIntelligence.sln --configuration Release --no-restore
+      - name: Restore EF tools
+        working-directory: backend
+        run: dotnet tool restore
+      - name: Verify migrations match the model
+        working-directory: backend
+        run: >-
+          dotnet ef migrations has-pending-model-changes
+          --project src/NewsIntelligence.Infrastructure/NewsIntelligence.Infrastructure.csproj
+          --startup-project src/NewsIntelligence.Api/NewsIntelligence.Api.csproj
+          --context AppDbContext
+          --no-build
+      - name: Test
+        run: dotnet test backend/NewsIntelligence.sln --configuration Release --no-build --verbosity normal
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm install
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Production build
+        working-directory: frontend
+        run: npm run build
